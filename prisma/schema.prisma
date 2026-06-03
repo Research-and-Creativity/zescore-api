@@ -1,0 +1,61 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  STUDENT
+  LECTURER
+  ADMIN
+}
+
+model User {
+  id        String   @id
+  name      String
+  role      Role
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  assessments Assessment[]
+}
+
+model Team {
+  id          String   @id @default(uuid())
+  teamName    String   @unique
+  boothNumber String   @unique
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  assessments Assessment[]
+}
+
+model Assessment {
+  id         String  @id @default(uuid())
+  teamId     String
+  voterId    String
+  isVoteOnly Boolean @default(false) // TRUE jika mahasiswa (hanya vote), FALSE jika dosen
+
+  // Kategori Nilai Khusus Dosen (Nullable karena Mahasiswa tidak mengisi ini)
+  criteria1  Int? // Contoh: Inovasi (1-100)
+  criteria2  Int? // Contoh: Penyampaian/Presentasi (1-100)
+  criteria3  Int? // Contoh: Penguasaan Teknis (1-100)
+  totalScore Float @default(0.0) // Hasil akhir kalkulasi
+
+  createdAt DateTime @default(now())
+
+  // Relasi ke tabel Team dan User
+  team  Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  voter User @relation(fields: [voterId], references: [id], onDelete: Cascade)
+
+  // Constraint: Biar dosen/mahasiswa gak bisa menilai tim yang sama dua kali
+  @@unique([teamId, voterId])
+}

@@ -22,6 +22,7 @@ model User {
   id        String   @id
   name      String
   role      Role
+  password  String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -32,6 +33,7 @@ model Team {
   id          String   @id @default(uuid())
   teamName    String   @unique
   boothNumber String   @unique
+  password    String
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -42,13 +44,12 @@ model Assessment {
   id         String  @id @default(uuid())
   teamId     String
   voterId    String
-  isVoteOnly Boolean @default(false) // TRUE jika mahasiswa (hanya vote), FALSE jika dosen
+  isVoteOnly Boolean @default(false)
 
-  // Kategori Nilai Khusus Dosen (Nullable karena Mahasiswa tidak mengisi ini)
-  criteria1  Int? // Contoh: Inovasi (1-100)
-  criteria2  Int? // Contoh: Penyampaian/Presentasi (1-100)
-  criteria3  Int? // Contoh: Penguasaan Teknis (1-100)
-  totalScore Float @default(0.0) // Hasil akhir kalkulasi
+  criteria1  Int?
+  criteria2  Int?
+  criteria3  Int?
+  totalScore Float @default(0.0)
 
   createdAt DateTime @default(now())
 

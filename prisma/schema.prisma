@@ -1,8 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
   provider = "prisma-client"
   output   = "../src/generated/prisma"
@@ -16,6 +11,11 @@ enum Role {
   STUDENT
   LECTURER
   ADMIN
+}
+
+enum ProjectCategory {
+  POSTER
+  PRODUCT
 }
 
 model User {
@@ -41,22 +41,21 @@ model Team {
 }
 
 model Assessment {
-  id         String  @id @default(uuid())
+  id         String          @id @default(uuid())
   teamId     String
   voterId    String
-  isVoteOnly Boolean @default(false)
+  category   ProjectCategory // POSTER atau PRODUCT
+  isVoteOnly Boolean         @default(false)
 
-  criteria1  Int?
-  criteria2  Int?
-  criteria3  Int?
-  totalScore Float @default(0.0)
+  criteria1  Int?    // mahasiswa: tidak diisi | dosen: nilai poster (0-100)
+  criteria2  Int?    // dosen: nilai product (0-100)
+  totalScore Float   @default(0.0)
 
   createdAt DateTime @default(now())
 
-  // Relasi ke tabel Team dan User
   team  Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
   voter User @relation(fields: [voterId], references: [id], onDelete: Cascade)
 
-  // Constraint: Biar dosen/mahasiswa gak bisa menilai tim yang sama dua kali
-  @@unique([teamId, voterId])
+  // Satu voter hanya bisa menilai satu kategori per tim
+  @@unique([teamId, voterId, category])
 }

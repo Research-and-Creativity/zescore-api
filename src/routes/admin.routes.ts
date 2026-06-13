@@ -2,26 +2,36 @@ import { Router } from "express";
 import {
   getStats,
   getRecap,
+  getBarScores,
   getTeams,
+  createTeam,
+  updateTeam,
+  deleteTeam,
   getUsers,
+  createUser,
+  updateUser,
+  deleteUser,
 } from "../controllers/admin.controller";
 import { authenticate, authorizeAdmin } from "../middlewares/auth.middleware";
 
 const router = Router();
-
-// Semua route admin butuh JWT valid + role ADMIN
 router.use(authenticate, authorizeAdmin);
 
-// GET /api/v1/admin/stats   → 4 angka ringkasan untuk widget card dashboard
+// Stats & recap
 router.get("/stats", getStats);
-
-// GET /api/v1/admin/recap   → data tabel + grafik per tim
 router.get("/recap", getRecap);
+router.get("/scores/bar", getBarScores);
 
-// GET /api/v1/admin/teams   → master data tim
+// Teams CRUD
 router.get("/teams", getTeams);
+router.post("/teams", createTeam);
+router.put("/teams/:id", updateTeam);
+router.delete("/teams/:id", deleteTeam);
 
-// GET /api/v1/admin/users   → master data mahasiswa & dosen
+// Users CRUD (Student & Lecturer)
 router.get("/users", getUsers);
+router.post("/users", createUser);
+router.put("/users/:id", updateUser);
+router.delete("/users/:id", deleteUser);
 
 export default router;

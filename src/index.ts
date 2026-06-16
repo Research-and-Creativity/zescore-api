@@ -7,7 +7,6 @@ import kioskRoutes from "./routes/kiosk.routes";
 import { errorHandler } from "./middlewares/error.middleware";
 
 const app = express();
-const PORT = process.env.PORT ?? 3000;
 
 // ── Middleware ────────────────────────────────────────────────────────────────
 app.use(
@@ -17,8 +16,10 @@ app.use(
       "http://localhost:5174",
       "http://127.0.0.1:5173",
       "http://127.0.0.1:5174",
+      "https://zescore.vercel.app",
+      "https://zescore.zetech.id", 
     ],
-    methods: ["GET", "POST", "PUT", "DELETE"],
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     credentials: true,
   }),
 );
@@ -43,7 +44,12 @@ app.use((_req, res) =>
 // ── Global Error Handler ──────────────────────────────────────────────────────
 app.use(errorHandler);
 
-app.listen(PORT, () => {
-  console.log(`⚡ ZeScore API berjalan di http://localhost:${PORT}`);
-  console.log(`   Health check: http://localhost:${PORT}/health`);
-});
+if (process.env.NODE_ENV !== "production") {
+  const PORT = process.env.PORT ?? 3000;
+  app.listen(PORT, () => {
+    console.log(`⚡ ZeScore API berjalan di http://localhost:${PORT}`);
+    console.log(`   Health check: http://localhost:${PORT}/health`);
+  });
+}
+
+export default app;

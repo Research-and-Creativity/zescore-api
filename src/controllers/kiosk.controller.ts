@@ -5,21 +5,104 @@ type Category = "POSTER" | "PRODUCT";
 const ALL_CATEGORIES: Category[] = ["POSTER", "PRODUCT"];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POST /api/v1/kiosk/validate-evaluator
-// Body: { idNumber, teamId }
-//
-// MAHASISWA (voucher GLOBAL — berlaku di semua stand):
-//   Setiap mahasiswa punya 2 voucher: 1x vote POSTER, 1x vote PRODUCT.
-//   Begitu salah satu voucher dipakai (di stand mana pun), kategori itu
-//   tidak bisa dipakai lagi di stand lain.
-//   -> `remaining` = kategori yang voucher-nya belum terpakai SAMA SEKALI.
-//
-// DOSEN (per-tim — tidak ada batas global):
-//   Dosen bisa menilai banyak tim, tapi setiap tim hanya bisa dinilai
-//   1x per kategori oleh dosen yang sama.
-//   -> `remaining` = kategori yang belum dinilai dosen ini UNTUK TIM INI.
+// GET /api/v1/kiosk/teams
+// List semua tim untuk ditampilkan di grid pemilihan tim (mesin kasir publik).
 // ─────────────────────────────────────────────────────────────────────────────
-export const validateEvaluator = async (
+export const listTeamsForKiosk = async (
+  _req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const teams = await prisma.team.findMany({
+      orderBy: { boothNumber: "asc" },
+      select: { id: true, teamName: true, boothNumber: true },
+    });
+    res.status(200).json(teams);
+  } catch (error) {
+    console.error("[kiosk/teams] ERROR:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Gagal memuat daftar tim." });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/v1/kiosk/check-identity
+// Body: { idNumber }
+// Cek apakah NIM/NIDN valid SAJA — tanpa perlu teamId.
+// Dipakai di step awal sebelum user memilih tim dari grid.
+// ─────────────────────────────────────────────────────────────────────────────
+export const checkIdentity = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const { idNumber } = req.body;
+
+    if (!idNumber) {
+      res
+        .status(400)
+        .json({ success: false, message: "idNumber wajib diisi." });
+      return;
+    }
+
+    const cleanId = String(idNumber).trim();
+    const user = await prisma.user.findUnique({ where: { id: cleanId } });
+
+    if (!user || (user.role !== "STUDENT" && user.role !== "LECTURER")) {
+      res.status(404).json({
+        success: false,
+        message:
+          "NIM/NIDN tidak ditemukan atau tidak terdaftar sebagai penilai.",
+      });
+      return;
+    }
+
+    // Untuk mahasiswa: cek dulu apakah voucher (global) masih ada sisa
+    if (user.role === "STUDENT") {
+      const used = await prisma.assessment.findMany({
+        where: { voterId: cleanId, isVoteOnly: true },
+        select: { category: true },
+      });
+      const usedCategories = used.map((u) => u.category as Category);
+      const remaining = ALL_CATEGORIES.filter(
+        (c) => !usedCategories.includes(c),
+      );
+
+      if (remaining.length === 0) {
+        res.status(403).json({
+          success: false,
+          message:
+            "Kedua voucher vote Anda (Poster & Product) sudah terpakai. Terima kasih telah berpartisipasi!",
+        });
+        return;
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Identitas valid.",
+      data: { idNumber: cleanId, name: user.name, type: user.role },
+    });
+  } catch (error) {
+    console.error("[kiosk/check-identity] ERROR:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Kesalahan server internal." });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/v1/kiosk/check-remaining
+// Body: { idNumber, teamId }
+// Setelah user pilih tim dari grid, cek kategori mana yang masih bisa
+// divote/dinilai untuk kombinasi evaluator + tim ini.
+//
+// MAHASISWA: voucher GLOBAL — kalau salah satu kategori sudah dipakai di
+//            stand mana pun, kategori itu hilang dari remaining di SEMUA tim.
+// DOSEN:     per-tim — remaining dihitung khusus untuk tim yang dipilih.
+// ─────────────────────────────────────────────────────────────────────────────
+export const checkRemaining = async (
   req: Request,
   res: Response,
 ): Promise<void> => {
@@ -36,30 +119,24 @@ export const validateEvaluator = async (
     const cleanId = String(idNumber).trim();
     const cleanTeamId = String(teamId).trim();
 
-    // Cek user ada
     const user = await prisma.user.findUnique({ where: { id: cleanId } });
     if (!user || (user.role !== "STUDENT" && user.role !== "LECTURER")) {
-      res.status(404).json({
-        success: false,
-        message:
-          "NIM/NIDN tidak ditemukan atau tidak terdaftar sebagai penilai.",
-      });
+      res
+        .status(404)
+        .json({ success: false, message: "Identitas tidak ditemukan." });
       return;
     }
 
-    // Cek tim ada
     const team = await prisma.team.findUnique({ where: { id: cleanTeamId } });
     if (!team) {
-      res
-        .status(404)
-        .json({ success: false, message: "Stand tidak ditemukan." });
+      res.status(404).json({ success: false, message: "Tim tidak ditemukan." });
       return;
     }
 
     let remaining: Category[];
 
     if (user.role === "STUDENT") {
-      // GLOBAL check — voucher berlaku di semua stand, bukan per tim
+      // GLOBAL — voucher berlaku lintas tim
       const used = await prisma.assessment.findMany({
         where: { voterId: cleanId, isVoteOnly: true },
         select: { category: true },
@@ -68,15 +145,17 @@ export const validateEvaluator = async (
       remaining = ALL_CATEGORIES.filter((c) => !usedCategories.includes(c));
 
       if (remaining.length === 0) {
-        res.status(403).json({
-          success: false,
-          message:
-            "Kedua voucher vote Anda (Poster & Product) sudah terpakai. Terima kasih telah berpartisipasi!",
+        res.status(200).json({
+          success: true,
+          data: {
+            remaining: [],
+            message: "Kedua voucher vote Anda sudah terpakai.",
+          },
         });
         return;
       }
     } else {
-      // LECTURER — per tim, tidak ada batas global
+      // LECTURER — per tim
       const done = await prisma.assessment.findMany({
         where: { voterId: cleanId, teamId: cleanTeamId, isVoteOnly: false },
         select: { category: true },
@@ -85,28 +164,20 @@ export const validateEvaluator = async (
       remaining = ALL_CATEGORIES.filter((c) => !doneCategories.includes(c));
 
       if (remaining.length === 0) {
-        res.status(403).json({
-          success: false,
-          message: `Anda sudah menilai semua kategori untuk Stand ${team.boothNumber} — ${team.teamName}.`,
+        res.status(200).json({
+          success: true,
+          data: {
+            remaining: [],
+            message: `Anda sudah menilai semua kategori untuk Stand ${team.boothNumber} — ${team.teamName}.`,
+          },
         });
         return;
       }
     }
 
-    res.status(200).json({
-      success: true,
-      message: "Verifikasi sukses.",
-      data: {
-        idNumber: cleanId,
-        name: user.name,
-        type: user.role, // STUDENT | LECTURER
-        remaining, // ["POSTER","PRODUCT"] | ["POSTER"] | ["PRODUCT"]
-        teamName: team.teamName,
-        boothNumber: team.boothNumber,
-      },
-    });
+    res.status(200).json({ success: true, data: { remaining } });
   } catch (error) {
-    console.error("[kiosk/validate] ERROR:", error);
+    console.error("[kiosk/check-remaining] ERROR:", error);
     res
       .status(500)
       .json({ success: false, message: "Kesalahan server internal." });
@@ -116,9 +187,7 @@ export const validateEvaluator = async (
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/v1/kiosk/vote-student
 // Body: { evaluatorId, teamId, category: "POSTER"|"PRODUCT" }
-//
-// Voucher GLOBAL: 1 mahasiswa hanya bisa vote 1x per kategori,
-// di stand mana pun (tidak terikat ke 1 tim tertentu).
+// Voucher GLOBAL: 1 mahasiswa hanya bisa vote 1x per kategori, di stand mana pun.
 // ─────────────────────────────────────────────────────────────────────────────
 export const submitStudentVote = async (
   req: Request,
@@ -136,10 +205,12 @@ export const submitStudentVote = async (
 
     const cat = String(category).toUpperCase() as Category;
     if (!ALL_CATEGORIES.includes(cat)) {
-      res.status(400).json({
-        success: false,
-        message: "Kategori harus POSTER atau PRODUCT.",
-      });
+      res
+        .status(400)
+        .json({
+          success: false,
+          message: "Kategori harus POSTER atau PRODUCT.",
+        });
       return;
     }
 
@@ -150,10 +221,12 @@ export const submitStudentVote = async (
       where: { id: cleanVoterId },
     });
     if (!student || student.role !== "STUDENT") {
-      res.status(403).json({
-        success: false,
-        message: "NIM tidak valid atau bukan mahasiswa.",
-      });
+      res
+        .status(403)
+        .json({
+          success: false,
+          message: "NIM tidak valid atau bukan mahasiswa.",
+        });
       return;
     }
 
@@ -165,8 +238,6 @@ export const submitStudentVote = async (
       return;
     }
 
-    // Voucher guard — GLOBAL: cek apakah kategori ini sudah pernah
-    // dipakai mahasiswa ini di stand mana pun
     const voucherUsed = await prisma.assessment.findFirst({
       where: { voterId: cleanVoterId, category: cat, isVoteOnly: true },
     });
@@ -199,14 +270,14 @@ export const submitStudentVote = async (
       },
     });
   } catch (error) {
-    // Race-condition fallback: kalau ada concurrent request lolos guard di atas,
-    // unique index partial (lihat migration) akan menolak di level DB.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     if ((error as any)?.code === "P2002") {
-      res.status(403).json({
-        success: false,
-        message: "Voucher vote untuk kategori ini sudah terpakai.",
-      });
+      res
+        .status(403)
+        .json({
+          success: false,
+          message: "Voucher vote untuk kategori ini sudah terpakai.",
+        });
       return;
     }
     console.error("[kiosk/vote-student] ERROR:", error);
@@ -217,9 +288,8 @@ export const submitStudentVote = async (
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/v1/kiosk/score-lecturer
 // Body: { evaluatorId, teamId, category: "POSTER"|"PRODUCT", score: 0-100 }
-//
-// Per tim — dosen yang sama tidak bisa menilai kategori yang sama
-// dua kali UNTUK TIM YANG SAMA, tapi bebas menilai tim lain.
+// Per tim — dosen yang sama tidak bisa menilai kategori yang sama dua kali
+// UNTUK TIM YANG SAMA, tapi bebas menilai tim lain.
 // ─────────────────────────────────────────────────────────────────────────────
 export const submitLecturerScore = async (
   req: Request,
@@ -239,10 +309,12 @@ export const submitLecturerScore = async (
     const numScore = Number(score);
 
     if (!ALL_CATEGORIES.includes(cat)) {
-      res.status(400).json({
-        success: false,
-        message: "Kategori harus POSTER atau PRODUCT.",
-      });
+      res
+        .status(400)
+        .json({
+          success: false,
+          message: "Kategori harus POSTER atau PRODUCT.",
+        });
       return;
     }
     if (isNaN(numScore) || numScore < 0 || numScore > 100) {
@@ -259,10 +331,12 @@ export const submitLecturerScore = async (
       where: { id: cleanVoterId },
     });
     if (!lecturer || lecturer.role !== "LECTURER") {
-      res.status(403).json({
-        success: false,
-        message: "NIDN tidak valid atau bukan dosen juri.",
-      });
+      res
+        .status(403)
+        .json({
+          success: false,
+          message: "NIDN tidak valid atau bukan dosen juri.",
+        });
       return;
     }
 
@@ -274,7 +348,6 @@ export const submitLecturerScore = async (
       return;
     }
 
-    // Cek dosen ini belum menilai kategori ini untuk tim ini
     const already = await prisma.assessment.findUnique({
       where: {
         teamId_voterId_category: {
@@ -292,7 +365,6 @@ export const submitLecturerScore = async (
       return;
     }
 
-    // criteria1 = nilai POSTER, criteria2 = nilai PRODUCT
     const data =
       cat === "POSTER" ? { criteria1: numScore } : { criteria2: numScore };
 
@@ -321,10 +393,12 @@ export const submitLecturerScore = async (
   } catch (error) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     if ((error as any)?.code === "P2002") {
-      res.status(403).json({
-        success: false,
-        message: "Kategori ini sudah Anda nilai untuk tim ini.",
-      });
+      res
+        .status(403)
+        .json({
+          success: false,
+          message: "Kategori ini sudah Anda nilai untuk tim ini.",
+        });
       return;
     }
     console.error("[kiosk/score-lecturer] ERROR:", error);

@@ -31,9 +31,14 @@ export const getRecap = async (_req: Request, res: Response) => {
 
   const recap = await Promise.all(
     teams.map(async (team) => {
-      // Total vote mahasiswa (isVoteOnly = true, semua kategori)
-      const totalVotes = await prisma.assessment.count({
-        where: { teamId: team.id, isVoteOnly: true },
+      // Vote mahasiswa — dipisah per kategori
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const votesPoster = await (prisma.assessment as any).count({
+        where: { teamId: team.id, isVoteOnly: true, category: "POSTER" },
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const votesProduct = await (prisma.assessment as any).count({
+        where: { teamId: team.id, isVoteOnly: true, category: "PRODUCT" },
       });
 
       // Jumlah dosen unik yang sudah menilai (minimal 1 kategori)
@@ -77,7 +82,9 @@ export const getRecap = async (_req: Request, res: Response) => {
         teamId: team.id,
         teamName: team.teamName,
         boothNumber: team.boothNumber,
-        totalVotes,
+        votesPoster,
+        votesProduct,
+        totalVotes: votesPoster + votesProduct,
         assessorCount: uniqueAssessors.size,
         avgPoster,
         avgProduct,
